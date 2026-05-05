@@ -1,0 +1,118 @@
+@import "tw-animate-css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 0.75rem;
+
+    /* Dark-first design tokens (HSL) */
+    --background:          240 20%  3%;    /* #05050A void */
+    --foreground:          210 40% 98%;    /* near white   */
+    --card:                240 18%  6%;    /* #0D0D18      */
+    --card-foreground:     210 40% 98%;
+    --popover:             240 18%  8%;
+    --popover-foreground:  210 40% 98%;
+    --primary:             197 89% 43%;    /* cyan-500     */
+    --primary-foreground:  240 20%  3%;
+    --secondary:           240 12% 12%;
+    --secondary-foreground:210 40% 80%;
+    --muted:               240 12% 10%;
+    --muted-foreground:    215 16% 47%;
+    --accent:              220 70% 55%;    /* blue-500     */
+    --accent-foreground:   210 40% 98%;
+    --destructive:           0 84% 60%;
+    --destructive-foreground:210 40% 98%;
+    --border:              240 12% 12%;
+    --input:               240 12% 10%;
+    --ring:                197 89% 43%;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+    font-family: var(--font-sans), system-ui, sans-serif;
+    color-scheme: dark;
+  }
+
+  body {
+    @apply antialiased bg-[#05050A] text-slate-100;
+    overscroll-behavior-y: none;
+  }
+}
+
+/* ── Glassmorphism utility ───────────────────────────────────────── */
+@layer utilities {
+  .glass {
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .glass-strong {
+    background: rgba(255, 255, 255, 0.07);
+    backdrop-filter: blur(32px);
+    -webkit-backdrop-filter: blur(32px);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+  }
+
+  .glass-card {
+    background: rgba(13, 13, 24, 0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  /* Electric gradient text */
+  .gradient-text {
+    background: linear-gradient(135deg, #22D3EE 0%, #3B82F6 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .gradient-text-gold {
+    background: linear-gradient(135deg, #FCD34D 0%, #F59E0B 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Gradient border card */
+  .gradient-border {
+    position: relative;
+    border-radius: 1rem;
+    background: linear-gradient(135deg, rgba(34,211,238,0.25) 0%, rgba(59,130,246,0.15) 100%);
+    padding: 1px;
+  }
+
+  .gradient-border-inner {
+    background: #0D0D18;
+    border-radius: calc(1rem - 1px);
+    height: 100%;
+    width: 100%;
+  }
+
+  /* Safe area */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 1rem);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0);
+  }
+
+  /* Noise texture overlay */
+  .noise::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    border-radius: inherit;
+  }
+}
