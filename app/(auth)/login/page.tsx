@@ -53,14 +53,11 @@ function LoginForm() {
 
       {/* Logo */}
       <div className="relative mb-8 text-center">
-        <div className="relative w-20 h-20 mx-auto mb-5">
-          <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 opacity-20 blur-xl" />
-          <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-glow-cyan">
-            <span className="text-4xl">🎾</span>
-          </div>
+        <div className="relative w-48 h-48 mx-auto mb-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Padel by Chubbs" className="w-full h-full object-contain drop-shadow-[0_0_24px_rgba(34,211,238,0.25)]" />
         </div>
-        <h1 className="text-4xl font-heading font-bold gradient-text tracking-tight">Padel</h1>
-        <p className="text-slate-500 text-sm mt-2 tracking-wide">Sign in to continue</p>
+        <p className="text-slate-500 text-sm tracking-wide">Sign in to continue</p>
       </div>
 
       {/* Tab switcher */}

@@ -36,10 +36,8 @@ export default async function HomePage() {
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-slate-500 text-sm">Welcome back</p>
-          <h1 className="text-2xl font-heading font-bold text-white mt-0.5">Padel Club 🎾</h1>
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo_home.png" alt="Padel by Chubbs" className="h-24 w-auto object-contain" />
         <Link href="/admin"
           className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-xs font-semibold text-slate-400">
           Admin
