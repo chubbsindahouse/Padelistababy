@@ -34,10 +34,10 @@ export default async function SessionsPage() {
 
   const playerMap = new Map((allPlayers ?? []).map((p) => [p.id, p as Profile]));
 
-  const enriched: SessionWithPlayers[] = pastSessions.map((s) => {
+  const enriched = pastSessions.map((s) => {
     const playerIds = (s.session_players as { player_id: string }[]).map((sp) => sp.player_id);
     return { ...s, players: playerIds.map((id) => playerMap.get(id)).filter(Boolean) as Profile[] };
-  });
+  }) as unknown as SessionWithPlayers[];
 
   return (
     <div className="px-4 pt-8 space-y-5">
