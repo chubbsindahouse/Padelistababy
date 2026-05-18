@@ -3,16 +3,18 @@ import { LeaderboardRow } from "@/components/leaderboard/leaderboard-row";
 import { Avatar } from "@/components/profile/avatar";
 import type { LeaderboardEntry, Profile } from "@/types";
 
-export const revalidate = 0;
+export const revalidate = 30;
 
 export default async function LeaderboardPage() {
   const supabase = await createClient();
 
-  const { data: profiles } = await supabase
-    .from("profiles").select("*").order("total_points", { ascending: false });
+  const [profilesRes, matchesRes] = await Promise.all([
+    supabase.from("profiles").select("id, name, avatar_url, total_points, elo_rating").order("total_points", { ascending: false }),
+    supabase.from("matches").select("team_a, team_b, winner_team").not("winner_team", "is", null),
+  ]);
 
-  const { data: matches } = await supabase
-    .from("matches").select("team_a, team_b, winner_team").not("winner_team", "is", null);
+  const profiles = profilesRes.data;
+  const matches  = matchesRes.data;
 
   const winCounts: Record<string, { wins: number; played: number }> = {};
   for (const m of matches ?? []) {

@@ -4,26 +4,22 @@ import { Avatar } from "@/components/profile/avatar";
 import { formatWinRate } from "@/lib/utils";
 import type { Profile } from "@/types";
 
-export const revalidate = 0;
+export const revalidate = 30;
 
 export default async function StatsPage() {
   const supabase = await createClient();
 
-  const { data: allProfiles } = await supabase
-    .from("profiles").select("*").order("total_points", { ascending: false });
-  const profiles = (allProfiles ?? []) as Profile[];
+  const [profilesRes, matchesRes, gamesRes, sessionsRes] = await Promise.all([
+    supabase.from("profiles").select("id, name, avatar_url, total_points, elo_rating").order("total_points", { ascending: false }),
+    supabase.from("matches").select("id, team_a, team_b, winner_team, session_id").not("winner_team", "is", null),
+    supabase.from("games").select("id"),
+    supabase.from("sessions").select("id").eq("is_active", false),
+  ]);
 
-  const { data: matchesData } = await supabase
-    .from("matches").select("id, team_a, team_b, winner_team, session_id")
-    .not("winner_team", "is", null);
-  const matches = matchesData ?? [];
-
-  const { data: gamesData } = await supabase.from("games").select("id");
-  const totalGames = gamesData?.length ?? 0;
-
-  const { data: sessionsData } = await supabase
-    .from("sessions").select("id").eq("is_active", false);
-  const totalSessions = sessionsData?.length ?? 0;
+  const profiles    = (profilesRes.data ?? []) as Profile[];
+  const matches     = matchesRes.data ?? [];
+  const totalGames  = gamesRes.data?.length ?? 0;
+  const totalSessions = sessionsRes.data?.length ?? 0;
 
   // Per-player win stats
   const winCounts: Record<string, { wins: number; played: number }> = {};

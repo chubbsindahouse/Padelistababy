@@ -44,12 +44,13 @@ export async function POST(
     .not("winner_team", "is", null)
     .order("match_order");
 
-  const enrichedMatches: MatchWithGames[] = [];
-  for (const m of matchesData ?? []) {
-    const { data: gs } = await admin
-      .from("games").select("*").eq("match_id", m.id).order("game_order");
-    enrichedMatches.push({ ...m, games: gs ?? [] });
-  }
+  const enrichedMatches: MatchWithGames[] = await Promise.all(
+    (matchesData ?? []).map(async (m) => {
+      const { data: gs } = await admin
+        .from("games").select("*").eq("match_id", m.id).order("game_order");
+      return { ...m, games: gs ?? [] };
+    })
+  );
 
   // 4. Calculate ELO deltas per match
   let currentRatings = new Map(profiles.map((p) => [p.id, p.elo_rating]));
@@ -172,16 +173,18 @@ export async function POST(
     await admin.from("elo_history").insert(eloHistoryInserts);
   }
 
-  // Update profile ratings + points
-  for (const id of playerIds) {
-    const newRating = currentRatings.get(id) ?? profileMap.get(id)?.elo_rating ?? 1000;
-    const earnedPoints = pointsEarned[id] ?? 0;
-    const currentPoints = profileMap.get(id)?.total_points ?? 0;
-    await admin.from("profiles").update({
-      elo_rating: newRating,
-      total_points: currentPoints + earnedPoints,
-    }).eq("id", id);
-  }
+  // Update profile ratings + points (all in parallel)
+  await Promise.all(
+    playerIds.map((id) => {
+      const newRating    = currentRatings.get(id) ?? profileMap.get(id)?.elo_rating ?? 1000;
+      const earnedPoints = pointsEarned[id] ?? 0;
+      const currentPoints = profileMap.get(id)?.total_points ?? 0;
+      return admin.from("profiles").update({
+        elo_rating: newRating,
+        total_points: currentPoints + earnedPoints,
+      }).eq("id", id);
+    })
+  );
 
   // New achievements
   const achievementInserts = Object.entries(newAchievements).flatMap(

@@ -5,31 +5,26 @@ import { Avatar } from "@/components/profile/avatar";
 import { formatRelativeDate } from "@/lib/utils";
 import type { Profile, Session } from "@/types";
 
-export const revalidate = 0;
+export const revalidate = 30;
 
 export default async function HomePage() {
   const supabase = await createClient();
 
-  const { data: allProfiles } = await supabase
-    .from("profiles").select("*").order("total_points", { ascending: false });
-  const profiles = (allProfiles ?? []) as Profile[];
-  const top3     = profiles.slice(0, 3);
+  const [profilesRes, activeRes, lastRes, matchesRes, sessionsCountRes] = await Promise.all([
+    supabase.from("profiles").select("id, name, avatar_url, total_points").order("total_points", { ascending: false }),
+    supabase.from("sessions").select("id, format").eq("is_active", true).order("created_at", { ascending: false }).limit(1),
+    supabase.from("sessions").select("id, date, format, winner_stays_on").eq("is_active", false).order("date", { ascending: false }).limit(1),
+    supabase.from("sessions").select("id", { count: "exact", head: true }).eq("is_active", false),
+    supabase.from("matches").select("id").not("winner_team", "is", null),
+  ]);
 
-  const { data: activeSessions } = await supabase
-    .from("sessions").select("*").eq("is_active", true)
-    .order("created_at", { ascending: false }).limit(1);
-  const activeSession = activeSessions?.[0] ?? null;
-
-  const { data: recentSessionsData } = await supabase
-    .from("sessions").select("*").eq("is_active", false)
-    .order("date", { ascending: false }).limit(1);
-  const lastSession = (recentSessionsData ?? [])[0] as Session | undefined;
-
-  const { data: matchesData } = await supabase
-    .from("matches").select("id, winner_team").not("winner_team", "is", null);
-  const totalMatches = matchesData?.length ?? 0;
-
-  const totalPlayers = profiles.length;
+  const profiles      = (profilesRes.data ?? []) as Profile[];
+  const top3          = profiles.slice(0, 3);
+  const activeSession = activeRes.data?.[0] ?? null;
+  const lastSession   = lastRes.data?.[0] as Session | undefined;
+  const totalMatches  = matchesRes.data?.length ?? 0;
+  const totalPlayers  = profiles.length;
+  const totalSessions = sessionsCountRes.count ?? 0;
 
   return (
     <div className="px-4 pt-8 space-y-5 pb-4">
@@ -83,7 +78,7 @@ export default async function HomePage() {
         {[
           { label: "Players",  value: totalPlayers },
           { label: "Matches",  value: totalMatches },
-          { label: "Sessions", value: recentSessionsData?.length ?? 0 },
+          { label: "Sessions", value: totalSessions },
         ].map(({ label, value }) => (
           <div key={label} className="glass-card rounded-xl p-3 text-center">
             <p className="text-lg font-heading font-black gradient-text">{value}</p>

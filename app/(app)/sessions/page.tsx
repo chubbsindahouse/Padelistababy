@@ -4,28 +4,40 @@ import { createClient } from "@/lib/supabase/server";
 import { SessionCard } from "@/components/session/session-card";
 import type { SessionWithPlayers, Profile } from "@/types";
 
-export const revalidate = 0;
+export const revalidate = 30;
 
 export default async function SessionsPage() {
   const supabase = await createClient();
 
-  const { data: activeSessions } = await supabase
-    .from("sessions").select("*").eq("is_active", true)
-    .order("created_at", { ascending: false }).limit(1);
-  const activeSession = activeSessions?.[0] ?? null;
+  const [activeRes, pastRes] = await Promise.all([
+    supabase.from("sessions").select("id, format, is_active, created_at")
+      .eq("is_active", true).order("created_at", { ascending: false }).limit(1),
+    supabase.from("sessions").select("id, date, format, is_active, winner_stays_on, session_players(player_id)")
+      .eq("is_active", false).order("date", { ascending: false }).limit(20),
+  ]);
 
-  const { data: pastSessions } = await supabase
-    .from("sessions")
-    .select("*, session_players(player_id)")
-    .eq("is_active", false).order("date", { ascending: false }).limit(20);
+  const activeSession = activeRes.data?.[0] ?? null;
+  const pastSessions = pastRes.data ?? [];
 
-  const enriched: SessionWithPlayers[] = [];
-  for (const s of pastSessions ?? []) {
+  // Collect all unique player IDs across all sessions in one shot
+  const allPlayerIds = [
+    ...new Set(
+      pastSessions.flatMap((s) =>
+        (s.session_players as { player_id: string }[]).map((sp) => sp.player_id)
+      )
+    ),
+  ];
+
+  const { data: allPlayers } = allPlayerIds.length
+    ? await supabase.from("profiles").select("id, name, avatar_url").in("id", allPlayerIds)
+    : { data: [] };
+
+  const playerMap = new Map((allPlayers ?? []).map((p: Profile) => [p.id, p]));
+
+  const enriched: SessionWithPlayers[] = pastSessions.map((s) => {
     const playerIds = (s.session_players as { player_id: string }[]).map((sp) => sp.player_id);
-    if (!playerIds.length) { enriched.push({ ...s, players: [] }); continue; }
-    const { data: players } = await supabase.from("profiles").select("*").in("id", playerIds);
-    enriched.push({ ...s, players: (players ?? []) as Profile[] });
-  }
+    return { ...s, players: playerIds.map((id) => playerMap.get(id)).filter(Boolean) as Profile[] };
+  });
 
   return (
     <div className="px-4 pt-8 space-y-5">

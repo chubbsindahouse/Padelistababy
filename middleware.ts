@@ -14,8 +14,10 @@ export async function middleware(request: NextRequest) {
   const adminToken  = request.cookies.get(ADMIN_COOKIE)?.value;
   const playerToken = request.cookies.get(PLAYER_COOKIE)?.value;
 
-  const isAdmin  = adminToken  ? await verifyAdminToken(adminToken)   : false;
-  const playerId = playerToken ? await verifyPlayerToken(playerToken)  : null;
+  const [isAdmin, playerId] = await Promise.all([
+    adminToken  ? verifyAdminToken(adminToken)  : Promise.resolve(false),
+    playerToken ? verifyPlayerToken(playerToken) : Promise.resolve(null),
+  ]);
   const isPlayer = !!playerId;
 
   // ── Admin-only routes ──
