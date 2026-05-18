@@ -32,7 +32,7 @@ export default async function SessionsPage() {
     ? await supabase.from("profiles").select("id, name, avatar_url").in("id", allPlayerIds)
     : { data: [] };
 
-  const playerMap = new Map((allPlayers ?? []).map((p: Profile) => [p.id, p]));
+  const playerMap = new Map((allPlayers ?? []).map((p) => [p.id, p as Profile]));
 
   const enriched: SessionWithPlayers[] = pastSessions.map((s) => {
     const playerIds = (s.session_players as { player_id: string }[]).map((sp) => sp.player_id);

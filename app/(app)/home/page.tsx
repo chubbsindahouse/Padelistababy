@@ -14,8 +14,8 @@ export default async function HomePage() {
     supabase.from("profiles").select("id, name, avatar_url, total_points").order("total_points", { ascending: false }),
     supabase.from("sessions").select("id, format").eq("is_active", true).order("created_at", { ascending: false }).limit(1),
     supabase.from("sessions").select("id, date, format, winner_stays_on").eq("is_active", false).order("date", { ascending: false }).limit(1),
-    supabase.from("sessions").select("id", { count: "exact", head: true }).eq("is_active", false),
     supabase.from("matches").select("id").not("winner_team", "is", null),
+    supabase.from("sessions").select("id", { count: "exact", head: true }).eq("is_active", false),
   ]);
 
   const profiles      = (profilesRes.data ?? []) as Profile[];
