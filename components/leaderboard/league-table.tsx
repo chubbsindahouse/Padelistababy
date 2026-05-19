@@ -10,10 +10,9 @@ export function LeagueTable({ entries }: { entries: LeaderboardEntry[] }) {
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
       {/* Header row */}
-      <div className="grid grid-cols-[2rem_1fr_2.2rem_2.2rem_2.2rem_3rem_3rem_1rem] gap-x-1 px-3 py-2.5 border-b border-white/10">
+      <div className="grid grid-cols-[2rem_1fr_2.2rem_2.2rem_2.5rem_2.5rem_1rem] gap-x-1 px-3 py-2.5 border-b border-white/10">
         <span className="text-[10px] font-bold text-slate-600 text-center uppercase tracking-wide">#</span>
         <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">Player</span>
-        <span className="text-[10px] font-bold text-slate-600 text-center uppercase tracking-wide">P</span>
         <span className="text-[10px] font-bold text-slate-600 text-center uppercase tracking-wide">W</span>
         <span className="text-[10px] font-bold text-slate-600 text-center uppercase tracking-wide">L</span>
         <span className="text-[10px] font-bold text-slate-600 text-right uppercase tracking-wide">ELO</span>
@@ -35,7 +34,7 @@ export function LeagueTable({ entries }: { entries: LeaderboardEntry[] }) {
             key={profile.id}
             href={`/profile/${profile.id}`}
             className={cn(
-              "grid grid-cols-[2rem_1fr_2.2rem_2.2rem_2.2rem_3rem_3rem_1rem] gap-x-1 items-center px-3 py-3 border-b border-white/[0.04] last:border-0 active:bg-white/[0.04] transition-colors",
+              "grid grid-cols-[2rem_1fr_2.2rem_2.2rem_2.5rem_2.5rem_1rem] gap-x-1 items-center px-3 py-3 border-b border-white/[0.04] last:border-0 active:bg-white/[0.04] transition-colors",
               isTop3 && "bg-white/[0.02]"
             )}
           >
@@ -49,15 +48,12 @@ export function LeagueTable({ entries }: { entries: LeaderboardEntry[] }) {
             </div>
 
             {/* Player */}
-            <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-2 min-w-0 overflow-hidden">
               <Avatar name={profile.name} avatarUrl={profile.avatar_url} size="sm" />
-              <span className="text-sm font-semibold text-cyan-400 underline underline-offset-2 decoration-cyan-400/30 truncate">
+              <span className="text-sm font-semibold text-cyan-400 underline underline-offset-2 decoration-cyan-400/30 break-words leading-tight">
                 {profile.name}
               </span>
             </div>
-
-            {/* P */}
-            <span className="text-xs text-slate-400 text-center tabular-nums">{matchesPlayed}</span>
 
             {/* W */}
             <span className="text-xs font-bold text-emerald-400 text-center tabular-nums">{matchWins}</span>
