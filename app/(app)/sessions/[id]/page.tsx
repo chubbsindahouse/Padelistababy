@@ -158,14 +158,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       .from("matches").select("*").eq("session_id", sessionId).order("match_order");
 
     const matchIds = (ms ?? []).map((m: { id: string }) => m.id);
-    const { data: allGamesData } = matchIds.length > 0
-      ? await supabase.from("games").select("*").in("match_id", matchIds).order("game_order")
-      : { data: [] };
+    const rawGames: { match_id: string; [key: string]: unknown }[] = matchIds.length > 0
+      ? ((await supabase.from("games").select("*").in("match_id", matchIds).order("game_order")).data ?? [])
+      : [];
 
-    const gamesByMatch: Record<string, typeof allGamesData> = {};
-    (allGamesData ?? []).forEach((g: { match_id: string }) => {
+    const gamesByMatch: Record<string, typeof rawGames> = {};
+    rawGames.forEach((g) => {
       if (!gamesByMatch[g.match_id]) gamesByMatch[g.match_id] = [];
-      gamesByMatch[g.match_id]!.push(g);
+      gamesByMatch[g.match_id].push(g);
     });
 
     const enriched: MatchWithGames[] = (ms ?? []).map((m) => ({
