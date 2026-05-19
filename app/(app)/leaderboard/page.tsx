@@ -1,6 +1,8 @@
+import Link from "next/link";
+import { Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { LeaderboardRow } from "@/components/leaderboard/leaderboard-row";
 import { Avatar } from "@/components/profile/avatar";
+import { LeagueTable } from "@/components/leaderboard/league-table";
 import type { LeaderboardEntry, Profile } from "@/types";
 
 export const revalidate = 30;
@@ -39,9 +41,16 @@ export default async function LeaderboardPage() {
 
   return (
     <div className="pt-8 pb-4">
-      <div className="px-4 mb-6">
-        <h1 className="text-2xl font-heading font-bold text-white">Leaderboard</h1>
-        <p className="text-slate-500 text-sm mt-1">{profiles?.length ?? 0} players competing</p>
+      <div className="px-4 mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-heading font-bold text-white">Leaderboard</h1>
+          <p className="text-slate-500 text-sm mt-1">{profiles?.length ?? 0} players competing</p>
+        </div>
+        <Link href="/pairs"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-xs font-semibold text-slate-400 active:bg-white/10 transition-colors">
+          <Users size={13} />
+          Pairs
+        </Link>
       </div>
 
       {/* Podium */}
@@ -90,14 +99,9 @@ export default async function LeaderboardPage() {
         </div>
       )}
 
-      {/* Full table */}
-      <div className="mx-4 glass-card rounded-2xl overflow-hidden">
-        {entries.map((entry) => (
-          <LeaderboardRow key={entry.profile.id} entry={entry} highlight={false} />
-        ))}
-        {entries.length === 0 && (
-          <p className="text-center text-slate-600 text-sm py-12">No players yet.</p>
-        )}
+      {/* League table */}
+      <div className="mx-4">
+        <LeagueTable entries={entries} />
       </div>
     </div>
   );

@@ -2,7 +2,10 @@
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Flag, Zap, Clock, Trophy, Check, Users } from "lucide-react";
+import {
+  ChevronLeft, Flag, Zap, Clock, Trophy, Check, Users,
+  UserPlus, UserMinus, FileText, ChevronDown, ChevronUp,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar } from "@/components/profile/avatar";
 import { cn } from "@/lib/utils";
@@ -31,7 +34,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [waitingPairs,  setWaitingPairs]  = useState<string[][]>([]);
   const [pairAssign,    setPairAssign]    = useState<Record<string, number>>({});
 
-  // Manual team picker (non-pair sessions)
+  // Manual team picker
   const [teamA,         setTeamA]         = useState<string[]>([]);
   const [teamB,         setTeamB]         = useState<string[]>([]);
   const [buildingTeams, setBuildingTeams] = useState(false);
@@ -41,6 +44,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   const [submittingScore, setSubmittingScore] = useState(false);
   const [endingSession,   setEndingSession]   = useState(false);
+
+  // ── Manage Players (add/remove mid-session) ──────────────────
+  const [showManage,     setShowManage]     = useState(false);
+  const [allProfiles,    setAllProfiles]    = useState<Profile[]>([]);
+  const [managingPlayer, setManagingPlayer] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -55,6 +63,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       const { data: ps } = await supabase.from("profiles").select("*").in("id", ids);
       setPlayers((ps ?? []) as Profile[]);
       await loadMatchesCore(s, (ps ?? []) as Profile[], pairs);
+
+      // Load all profiles for add-player dropdown
+      const { data: ap } = await supabase.from("profiles").select("*").order("name");
+      setAllProfiles((ap ?? []) as Profile[]);
     }
     load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -73,13 +85,10 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       const consec  = m.consecutive_wins ?? 0;
 
       if (i === 0) {
-        // First match used pairs[0] & pairs[1] — not from queue
         queue = [...queue, losers];
       } else if (onCourt.length > 0) {
-        // Winners were on court; challengers came from queue[0]
         queue = [...queue.slice(1), losers];
       } else {
-        // 3-win restart: both teams came from queue[0] and queue[1]
         queue = [...queue.slice(2), losers];
       }
 
@@ -107,7 +116,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     setCurrentMatch(active);
 
     const isOdd = profileList.length % 2 !== 0;
-    if (s?.winner_stays_on && !isOdd && pairs.length >= 2) {
+    // If manual_override is set, skip pair-system queue derivation
+    const useOverride = s?.manual_override;
+    if (s?.winner_stays_on && !isOdd && pairs.length >= 2 && !useOverride) {
       const completed = enriched.filter((m) => m.winner_team !== null);
       const { queue, onCourt } = deriveQueueState(s, pairs, completed);
       setOnCourtPair(onCourt);
@@ -166,19 +177,17 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   async function startMatch() {
     let tA: string[], tB: string[];
     const isOdd = players.length % 2 !== 0;
+    const useOverride = session?.manual_override;
 
-    if (session?.winner_stays_on && !isOdd && initialPairs.length >= 2) {
-      // Even player pair system — fully automatic
+    if (!useOverride && session?.winner_stays_on && !isOdd && initialPairs.length >= 2) {
       const done = matches.filter(m => m.winner_team !== null);
       if (done.length === 0)             { tA = initialPairs[0]; tB = initialPairs[1]; }
       else if (onCourtPair.length === 2) { tA = onCourtPair; tB = waitingPairs[0] ?? []; }
       else                               { tA = waitingPairs[0] ?? []; tB = waitingPairs[1] ?? []; }
-    } else if (session?.winner_stays_on && isOdd && onCourtPlayers.length === 2) {
-      // Odd player — winners stay, challengers manually picked
+    } else if (!useOverride && session?.winner_stays_on && isOdd && onCourtPlayers.length === 2) {
       tA = onCourtPlayers;
       tB = challengerPick;
     } else {
-      // Full manual pick (no winner_stays_on, odd first match, or 3-win reset)
       tA = teamA;
       tB = teamB;
     }
@@ -216,7 +225,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     const last = done[done.length - 1];
     let consec = 0;
     if (session?.winner_stays_on) {
-      // Compare by actual player IDs, not positional labels ("a"/"b")
       const lastWinnerIds: string[] = last
         ? (last.winner_team === "a" ? last.team_a : last.team_b)
         : [];
@@ -244,6 +252,38 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     } finally { setEndingSession(false); }
   }
 
+  // ── Add / Remove player ──────────────────────────────────────
+  async function managePlayer(action: "add" | "remove", player_id: string) {
+    setManagingPlayer(player_id);
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/players`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, player_id }),
+      });
+      if (!res.ok) { alert("Could not update roster."); return; }
+
+      // Update local player list
+      if (action === "add") {
+        const added = allProfiles.find(p => p.id === player_id);
+        if (added) setPlayers(prev => [...prev, added]);
+      } else {
+        setPlayers(prev => prev.filter(p => p.id !== player_id));
+      }
+
+      // Reload session to get updated manual_override flag
+      const { data: updatedSession } = await supabase.from("sessions").select("*").eq("id", sessionId).single<Session>();
+      if (updatedSession) setSession(updatedSession);
+
+      // Clear pairs — manual override is now on
+      setInitialPairs([]);
+      setOnCourtPair([]);
+      setWaitingPairs([]);
+    } finally {
+      setManagingPlayer(null);
+    }
+  }
+
   const gamesWonA  = currentMatch?.games.filter(g => g.score_a > g.score_b).length ?? 0;
   const gamesWonB  = currentMatch?.games.filter(g => g.score_b > g.score_a).length ?? 0;
   const winsNeeded = session?.format === "bo5" ? 3 : 2;
@@ -262,10 +302,20 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       <div className="relative z-10 px-4 pt-safe">
         <div className="flex items-center gap-3 py-4">
           <button onClick={() => router.back()} className="p-2 -ml-2 rounded-xl text-slate-400 active:bg-white/5 transition-colors"><ChevronLeft size={22} /></button>
-          <div>
+          <div className="flex-1">
             <h1 className="text-base font-bold text-white">Session Detail</h1>
             <p className="text-xs text-slate-500">{new Date(session.date).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}</p>
           </div>
+          {/* Report button */}
+          <a
+            href={`/api/sessions/${sessionId}/report`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-2 bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold rounded-xl active:bg-cyan-500/20 transition-all"
+          >
+            <FileText size={13} />
+            Report
+          </a>
         </div>
       </div>
       <div className="relative z-10 px-4 pb-28 space-y-3">
@@ -293,39 +343,42 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             </div>
           );
         })}
+        {matches.length === 0 && (
+          <p className="text-center text-slate-600 text-sm py-12">No matches recorded for this session.</p>
+        )}
       </div>
     </div>
   );
 
   /* ── Active session derived state ── */
+  const manualOverride     = session.manual_override ?? false;
   const isOddPlayers       = players.length % 2 !== 0;
   const completedMatches   = matches.filter(m => m.winner_team !== null);
   const lastCompleted      = completedMatches[completedMatches.length - 1];
   const lastConsecutive    = lastCompleted?.consecutive_wins ?? 0;
   const isThreeWinRotation = session.three_win_rule && lastConsecutive >= 3;
 
-  // Even players: pair system
-  const usePairSystem  = session.winner_stays_on && !isOddPlayers && initialPairs.length >= 2;
-  const needsPairSetup = session.winner_stays_on && !isOddPlayers && initialPairs.length === 0 && completedMatches.length === 0 && !currentMatch;
+  const usePairSystem  = !manualOverride && session.winner_stays_on && !isOddPlayers && initialPairs.length >= 2;
+  const needsPairSetup = !manualOverride && session.winner_stays_on && !isOddPlayers && initialPairs.length === 0 && completedMatches.length === 0 && !currentMatch;
 
-  // Odd players: derive who's currently on court from last completed match
-  // Returns empty if 3-win rotation just triggered (so we fall back to full manual pick)
   const onCourtPlayers: string[] = (() => {
-    if (!session.winner_stays_on || !isOddPlayers || !lastCompleted) return [];
+    if (manualOverride || !session.winner_stays_on || !isOddPlayers || !lastCompleted) return [];
     if (session.three_win_rule && (lastCompleted.consecutive_wins ?? 0) >= 3) return [];
     return lastCompleted.winner_team === "a" ? lastCompleted.team_a : lastCompleted.team_b;
   })();
 
-  // Players available to be picked as challengers (odd sessions)
   const availableForChallenge = players.filter(p => !onCourtPlayers.includes(p.id));
 
-  // Auto-computed next matchup (even / pair system only)
   let nextTeamA: string[] = [], nextTeamB: string[] = [];
   if (usePairSystem && !currentMatch) {
     if (completedMatches.length === 0)   { nextTeamA = initialPairs[0] ?? []; nextTeamB = initialPairs[1] ?? []; }
     else if (onCourtPair.length === 2)   { nextTeamA = onCourtPair; nextTeamB = waitingPairs[0] ?? []; }
     else                                 { nextTeamA = waitingPairs[0] ?? []; nextTeamB = waitingPairs[1] ?? []; }
   }
+
+  // Players NOT in session (available to add)
+  const playerIdsInSession = new Set(players.map(p => p.id));
+  const addablePlayers = allProfiles.filter(p => !playerIdsInSession.has(p.id));
 
   const headerBar = (subtitle: string) => (
     <div className="relative z-10 px-4 pt-safe border-b border-white/[0.06] bg-[#05050A]/80 backdrop-blur-xl">
@@ -335,19 +388,24 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
             <h1 className="text-base font-bold text-white">Live Session</h1>
+            {manualOverride && (
+              <span className="text-[9px] font-bold bg-amber-500/15 border border-amber-500/25 text-amber-400 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                Manual Mode
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-500">{subtitle}</p>
         </div>
         <button onClick={endSession} disabled={endingSession}
           className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-semibold rounded-xl active:bg-red-500/20 transition-all">
           {endingSession ? <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" /> : <Flag size={13} />}
-          End Session
+          End
         </button>
       </div>
     </div>
   );
 
-  /* ── Pair setup screen (even players, winner_stays_on, before first match) ── */
+  /* ── Pair setup screen ── */
   if (needsPairSetup) {
     const numPairs = Math.floor(players.length / 2);
     const allAssigned = players.length > 0 &&
@@ -361,7 +419,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         {headerBar("Assign players to pairs before starting")}
         <div className="relative z-10 flex-1 px-4 py-4 space-y-4 overflow-y-auto pb-28">
 
-          {/* Pair slots */}
           <div className="glass-card rounded-2xl p-4">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">{numPairs} pairs · {players.length} players</p>
             <div className="space-y-2">
@@ -391,7 +448,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             </div>
           </div>
 
-          {/* Player assignment */}
           <div className="glass-card rounded-2xl p-4">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">Assign to Pair</p>
             <div className="space-y-2">
@@ -439,7 +495,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   return (
     <div className="min-h-screen bg-[#05050A] flex flex-col">
       <div className="fixed top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-cyan-500/6 blur-[120px] rounded-full pointer-events-none" />
-      {headerBar(`${session.format.toUpperCase()}${session.winner_stays_on ? " · Winner Stays On" : ""}${isOddPlayers ? " · Pick challengers each round" : ""} · ${players.length} players`)}
+      {headerBar(
+        manualOverride
+          ? `${session.format.toUpperCase()} · Manual Mode · ${players.length} players`
+          : `${session.format.toUpperCase()}${session.winner_stays_on ? " · Winner Stays On" : ""}${isOddPlayers ? " · Pick challengers each round" : ""} · ${players.length} players`
+      )}
 
       <div className="relative z-10 flex-1 px-4 py-4 space-y-4 overflow-y-auto pb-28">
 
@@ -545,14 +605,19 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               </p>
             </div>
 
-            {/* 3-win rotation banner (all session types) */}
-            {isThreeWinRotation && (
+            {isThreeWinRotation && !manualOverride && (
               <div className="mb-4 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center">
                 <p className="text-xs text-amber-400 font-bold">🔄 3-win rule — winners rotate off!</p>
               </div>
             )}
 
-            {/* ── EVEN players: auto pair system ── */}
+            {manualOverride && completedMatches.length > 0 && (
+              <div className="mb-4 px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center">
+                <p className="text-xs text-amber-400 font-bold">👥 Roster changed — pick teams manually each round</p>
+              </div>
+            )}
+
+            {/* EVEN players: auto pair system */}
             {usePairSystem ? (
               <div>
                 {!isThreeWinRotation && onCourtPair.length > 0 && completedMatches.length > 0 && (
@@ -593,10 +658,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 </button>
               </div>
 
-            /* ── ODD players: winner stays, pick challengers ── */
-            ) : session.winner_stays_on && isOddPlayers && onCourtPlayers.length === 2 ? (
+            /* ODD players: winner stays, pick challengers */
+            ) : !manualOverride && session.winner_stays_on && isOddPlayers && onCourtPlayers.length === 2 ? (
               <div>
-                {/* Who's staying on court */}
                 <div className="mb-4 px-3 py-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20">
                   <p className="text-xs text-cyan-400 font-bold text-center mb-2">🏆 Staying on court</p>
                   <div className="flex justify-center gap-6">
@@ -608,7 +672,6 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                     ))}
                   </div>
                 </div>
-
                 <p className="text-xs text-slate-500 mb-3">
                   Pick 2 challengers
                   <span className="text-cyan-400 font-semibold"> ({challengerPick.length}/2 selected)</span>
@@ -620,10 +683,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                     return (
                       <button key={p.id} onClick={() => toggleChallengerPick(p.id)} disabled={full}
                         className={cn("w-full flex items-center gap-3 p-3 rounded-xl border transition-all",
-                          sel
-                            ? "bg-violet-500/15 border-violet-500/40"
-                            : full
-                              ? "bg-white/[0.02] border-white/[0.04] opacity-40 cursor-not-allowed"
+                          sel ? "bg-violet-500/15 border-violet-500/40"
+                              : full ? "bg-white/[0.02] border-white/[0.04] opacity-40 cursor-not-allowed"
                               : "bg-white/[0.03] border-white/[0.06] active:bg-white/[0.06]")}>
                         <Avatar name={p.name} avatarUrl={p.avatar_url} size="sm" />
                         <span className="text-sm font-semibold text-white flex-1 text-left">{p.name.split(" ")[0]}</span>
@@ -641,7 +702,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
                 </button>
               </div>
 
-            /* ── Manual full team picker (no winner_stays_on, odd first match, or 3-win reset) ── */
+            /* Manual full team picker */
             ) : buildingTeams ? (
               <div className="space-y-3">
                 <p className="text-xs text-slate-500 mb-2">Tap A or B to assign each player</p>
@@ -690,7 +751,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           </div>
         )}
 
-        {/* ── Queue display (even player pair system only) ── */}
+        {/* ── Queue display (pair system only) ── */}
         {usePairSystem && waitingPairs.length > 0 && (
           <div className="glass-card rounded-2xl p-4">
             <div className="flex items-center gap-2 mb-3">
@@ -719,6 +780,92 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             </div>
           </div>
         )}
+
+        {/* ── Manage Players (add / remove mid-session) ── */}
+        <div className="glass-card rounded-2xl overflow-hidden">
+          <button
+            onClick={() => setShowManage(prev => !prev)}
+            className="w-full flex items-center gap-3 px-4 py-3.5 active:bg-white/[0.04] transition-colors">
+            <div className="w-7 h-7 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+              <Users size={13} className="text-slate-400" />
+            </div>
+            <div className="flex-1 text-left">
+              <p className="text-xs font-bold text-slate-300">Manage Players</p>
+              <p className="text-[10px] text-slate-600">{players.length} in session</p>
+            </div>
+            {showManage ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
+          </button>
+
+          {showManage && (
+            <div className="px-4 pb-4 space-y-4 border-t border-white/[0.06]">
+
+              {/* Current players */}
+              <div className="pt-3">
+                <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wide mb-2">In Session</p>
+                <div className="space-y-1.5">
+                  {players.map(p => {
+                    const inCurrentMatch = currentMatch
+                      ? [...currentMatch.team_a, ...currentMatch.team_b].includes(p.id)
+                      : false;
+                    return (
+                      <div key={p.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.05]">
+                        <Avatar name={p.name} avatarUrl={p.avatar_url} size="sm" />
+                        <span className="text-sm font-semibold text-white flex-1 truncate">{p.name}</span>
+                        {inCurrentMatch ? (
+                          <span className="text-[9px] font-bold bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 px-2 py-1 rounded-full">Playing</span>
+                        ) : (
+                          <button
+                            onClick={() => managePlayer("remove", p.id)}
+                            disabled={managingPlayer === p.id || players.length <= 4}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-bold disabled:opacity-30 active:bg-red-500/20 transition-all">
+                            {managingPlayer === p.id
+                              ? <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" />
+                              : <UserMinus size={11} />}
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {players.length <= 4 && (
+                  <p className="text-[10px] text-slate-600 mt-2 text-center">Min. 4 players required to remove</p>
+                )}
+              </div>
+
+              {/* Add players */}
+              {addablePlayers.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wide mb-2">Add Player</p>
+                  <div className="space-y-1.5">
+                    {addablePlayers.map(p => (
+                      <div key={p.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.05]">
+                        <Avatar name={p.name} avatarUrl={p.avatar_url} size="sm" />
+                        <span className="text-sm font-semibold text-slate-400 flex-1 truncate">{p.name}</span>
+                        <button
+                          onClick={() => managePlayer("add", p.id)}
+                          disabled={managingPlayer === p.id}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold disabled:opacity-30 active:bg-emerald-500/20 transition-all">
+                          {managingPlayer === p.id
+                            ? <div className="w-3 h-3 border border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                            : <UserPlus size={11} />}
+                          Add
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Warning */}
+              <div className="px-3 py-2.5 rounded-xl bg-amber-500/8 border border-amber-500/15">
+                <p className="text-[10px] text-amber-400/80 leading-relaxed">
+                  Adding or removing a player switches the session to <span className="font-bold">full manual mode</span> — teams will be picked manually from the next match onwards.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* ── Match history ── */}
         {completedMatches.length > 0 && (

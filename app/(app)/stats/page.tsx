@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Avatar } from "@/components/profile/avatar";
 import { formatWinRate } from "@/lib/utils";
@@ -123,13 +124,14 @@ export default async function StatsPage() {
                 <span className="text-xs font-bold text-slate-600 w-5">#{i + 1}</span>
                 <Avatar name={p.name} avatarUrl={p.avatar_url} size="sm" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">{p.name}</p>
+                  <p className="text-sm font-semibold text-cyan-400 underline underline-offset-2 decoration-cyan-400/30 truncate">{p.name}</p>
                   <p className="text-xs text-slate-500">{played} matches</p>
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-bold gradient-text">{formatWinRate(wins, played)}</p>
                   <p className="text-[10px] text-slate-600">{wins}W {played - wins}L</p>
                 </div>
+                <ChevronRight size={13} className="text-slate-600 shrink-0" />
               </Link>
             ))}
           </div>

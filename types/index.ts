@@ -17,6 +17,7 @@ export interface Session {
   format: "bo3" | "bo5";
   winner_stays_on: boolean;
   three_win_rule: boolean;
+  manual_override: boolean;
   is_active: boolean;
   ended_at: string | null;
   created_at: string;
