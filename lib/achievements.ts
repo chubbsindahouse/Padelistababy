@@ -136,5 +136,3 @@ export function checkAchievements(
 
   return newlyEarned;
 }
-;
-}
