@@ -95,7 +95,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
       const enriched: MatchWithGames[] = (ms ?? []).map((m) => ({
         ...m,
-        games: (gamesByMatch[m.id] ?? []) as MatchWithGames["games"],
+        games: (gamesByMatch[m.id] ?? []) as unknown as MatchWithGames["games"],
       }));
 
       setMatches(enriched);
@@ -170,7 +170,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
     const enriched: MatchWithGames[] = (ms ?? []).map((m) => ({
       ...m,
-      games: (gamesByMatch[m.id] ?? []) as MatchWithGames["games"],
+      games: (gamesByMatch[m.id] ?? []) as unknown as MatchWithGames["games"],
     }));
     setMatches(enriched);
     const active = enriched.find((m) => !m.winner_team) ?? null;
