@@ -44,6 +44,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
   const [submittingScore, setSubmittingScore] = useState(false);
   const [endingSession,   setEndingSession]   = useState(false);
+  const [loading,         setLoading]         = useState(true);
 
   // ── Manage Players (add/remove mid-session) ──────────────────
   const [showManage,     setShowManage]     = useState(false);
@@ -56,17 +57,66 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       const pairs: string[][] = stored ? JSON.parse(stored) : [];
       setInitialPairs(pairs);
 
-      const { data: s } = await supabase.from("sessions").select("*").eq("id", sessionId).single<Session>();
-      setSession(s);
-      const { data: sps } = await supabase.from("session_players").select("player_id").eq("session_id", sessionId);
-      const ids = (sps ?? []).map((r: { player_id: string }) => r.player_id);
-      const { data: ps } = await supabase.from("profiles").select("*").in("id", ids);
-      setPlayers((ps ?? []) as Profile[]);
-      await loadMatchesCore(s, (ps ?? []) as Profile[], pairs);
+      // Round 1: all queries that only need sessionId — run in parallel
+      const [
+        { data: s },
+        { data: sps },
+        { data: ms },
+        { data: ap },
+      ] = await Promise.all([
+        supabase.from("sessions").select("*").eq("id", sessionId).single<Session>(),
+        supabase.from("session_players").select("player_id").eq("session_id", sessionId),
+        supabase.from("matches").select("*").eq("session_id", sessionId).order("match_order"),
+        supabase.from("profiles").select("*").order("name"),
+      ]);
 
-      // Load all profiles for add-player dropdown
-      const { data: ap } = await supabase.from("profiles").select("*").order("name");
+      const playerIds = (sps ?? []).map((r: { player_id: string }) => r.player_id);
+      const matchIds  = (ms  ?? []).map((m: { id: string }) => m.id);
+
+      // Round 2: player profiles + ALL games in one query — run in parallel
+      const [{ data: ps }, { data: allGamesData }] = await Promise.all([
+        supabase.from("profiles").select("*").in("id", playerIds),
+        matchIds.length > 0
+          ? supabase.from("games").select("*").in("match_id", matchIds).order("game_order")
+          : Promise.resolve({ data: [] as { id: string; match_id: string; score_a: number; score_b: number; game_order: number }[] }),
+      ]);
+
+      const profileList = (ps ?? []) as Profile[];
+      setSession(s);
+      setPlayers(profileList);
       setAllProfiles((ap ?? []) as Profile[]);
+
+      // Group games by match_id (no per-match round trips)
+      const gamesByMatch: Record<string, typeof allGamesData> = {};
+      (allGamesData ?? []).forEach((g) => {
+        if (!gamesByMatch[g.match_id]) gamesByMatch[g.match_id] = [];
+        gamesByMatch[g.match_id]!.push(g);
+      });
+
+      const enriched: MatchWithGames[] = (ms ?? []).map((m) => ({
+        ...m,
+        games: (gamesByMatch[m.id] ?? []) as MatchWithGames["games"],
+      }));
+
+      setMatches(enriched);
+      const active = enriched.find((m) => !m.winner_team) ?? null;
+      setCurrentMatch(active);
+
+      const isOdd      = profileList.length % 2 !== 0;
+      const useOverride = s?.manual_override;
+      if (s?.winner_stays_on && !isOdd && pairs.length >= 2 && !useOverride) {
+        const completed = enriched.filter((m) => m.winner_team !== null);
+        const { queue, onCourt } = deriveQueueState(s, pairs, completed);
+        setOnCourtPair(onCourt);
+        if (active) {
+          const activePlayers = new Set([...active.team_a, ...active.team_b]);
+          setWaitingPairs(queue.filter(pair => !pair.some(id => activePlayers.has(id))));
+        } else {
+          setWaitingPairs(queue);
+        }
+      }
+
+      setLoading(false);
     }
     load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -106,11 +156,22 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   async function loadMatchesCore(s: Session | null, profileList: Profile[], pairs: string[][]) {
     const { data: ms } = await supabase
       .from("matches").select("*").eq("session_id", sessionId).order("match_order");
-    const enriched: MatchWithGames[] = [];
-    for (const m of ms ?? []) {
-      const { data: gs } = await supabase.from("games").select("*").eq("match_id", m.id).order("game_order");
-      enriched.push({ ...m, games: gs ?? [] });
-    }
+
+    const matchIds = (ms ?? []).map((m: { id: string }) => m.id);
+    const { data: allGamesData } = matchIds.length > 0
+      ? await supabase.from("games").select("*").in("match_id", matchIds).order("game_order")
+      : { data: [] };
+
+    const gamesByMatch: Record<string, typeof allGamesData> = {};
+    (allGamesData ?? []).forEach((g: { match_id: string }) => {
+      if (!gamesByMatch[g.match_id]) gamesByMatch[g.match_id] = [];
+      gamesByMatch[g.match_id]!.push(g);
+    });
+
+    const enriched: MatchWithGames[] = (ms ?? []).map((m) => ({
+      ...m,
+      games: (gamesByMatch[m.id] ?? []) as MatchWithGames["games"],
+    }));
     setMatches(enriched);
     const active = enriched.find((m) => !m.winner_team) ?? null;
     setCurrentMatch(active);
@@ -343,7 +404,12 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             </div>
           );
         })}
-        {matches.length === 0 && (
+        {loading && (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-8 h-8 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin" />
+          </div>
+        )}
+        {!loading && matches.length === 0 && (
           <p className="text-center text-slate-600 text-sm py-12">No matches recorded for this session.</p>
         )}
       </div>
