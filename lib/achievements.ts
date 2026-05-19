@@ -1,7 +1,7 @@
 import type { BadgeKey, MatchWithGames, Profile } from "@/types";
 
 // ─── Achievement Checker ──────────────────────────────────────────────────────
-// Called at the end of a session. Returns a map of player_id → badge keys earned.
+// Called at the end of every session. Returns a map of player_id → badge keys earned.
 
 export interface AchievementCheckInput {
   sessionId: string;
@@ -135,4 +135,6 @@ export function checkAchievements(
   });
 
   return newlyEarned;
+}
+;
 }
