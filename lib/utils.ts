@@ -76,7 +76,7 @@ export const BADGE_CATALOGUE: BadgeMeta[] = [
   {
     key: "perfect_game",
     name: "Perfect Game",
-    description: "Win a game 6–0.",
+    description: "Win a match without dropping a single set (2–0 in BO3, 3–0 in BO5).",
     icon: "💎",
   },
   {
@@ -88,7 +88,7 @@ export const BADGE_CATALOGUE: BadgeMeta[] = [
   {
     key: "century_club",
     name: "Century Club",
-    description: "Play 100 total games across all sessions.",
+    description: "Play 100 total matches across all sessions.",
     icon: "💯",
   },
   {

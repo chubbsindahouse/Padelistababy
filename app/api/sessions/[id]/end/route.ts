@@ -16,7 +16,6 @@ export async function POST(
     return NextResponse.json({ error: "Admin access required" }, { status: 401 });
   }
 
-  // Admin client bypasses RLS on all DB writes
   const admin = createAdminClient();
 
   // 1. Load session
@@ -26,7 +25,7 @@ export async function POST(
     return NextResponse.json({ error: "Session not found or already ended" }, { status: 404 });
   }
 
-  // 2. Load session players
+  // 2. Load session players + profiles
   const { data: spRows } = await admin
     .from("session_players").select("player_id").eq("session_id", sessionId);
   const playerIds = (spRows ?? []).map((r: { player_id: string }) => r.player_id);
@@ -36,7 +35,7 @@ export async function POST(
   const profiles = (profilesData ?? []) as Profile[];
   const profileMap = new Map(profiles.map((p) => [p.id, p]));
 
-  // 3. Load all completed matches with games
+  // 3. Load completed matches for this session with their games
   const { data: matchesData } = await admin
     .from("matches")
     .select("*")
@@ -52,26 +51,38 @@ export async function POST(
     })
   );
 
-  // 4. Calculate ELO deltas per match
+  // 4. ELO deltas per match — track per-match ELOs for Giant Killer
   let currentRatings = new Map(profiles.map((p) => [p.id, p.elo_rating]));
+
   const eloHistoryInserts: {
     player_id: string; session_id: string;
-    rating_before: number; rating_after: number;
+    rating_before: number; rating_after: number; delta: number;
   }[] = [];
 
-  // Track per-player session match results for points
   const sessionResults: Record<string, { wins: number; losses: number }> = {};
   playerIds.forEach((id) => { sessionResults[id] = { wins: 0, losses: 0 }; });
+
+  // Track Giant Killer per player: wins where opponent avg ELO was 100+ higher
+  const giantKillerEarned = new Set<string>();
 
   for (const match of enrichedMatches) {
     const winner = match.winner_team!;
     const winnerIds = winner === "a" ? match.team_a : match.team_b;
-    const loserIds = winner === "a" ? match.team_b : match.team_a;
-
-    const ratingsBefore = new Map(currentRatings);
+    const loserIds  = winner === "a" ? match.team_b : match.team_a;
 
     const teamAElos = match.team_a.map((id) => currentRatings.get(id) ?? 1000);
     const teamBElos = match.team_b.map((id) => currentRatings.get(id) ?? 1000);
+
+    // Giant Killer: winning pair had avg ELO >= 100 lower than losing pair
+    const winnerElos = winner === "a" ? teamAElos : teamBElos;
+    const loserElos  = winner === "a" ? teamBElos : teamAElos;
+    const avgWinner  = winnerElos.reduce((s, r) => s + r, 0) / winnerElos.length;
+    const avgLoser   = loserElos.reduce((s, r) => s + r, 0) / loserElos.length;
+    if (avgLoser - avgWinner >= 100) {
+      winnerIds.forEach((id) => giantKillerEarned.add(id));
+    }
+
+    const ratingsBefore = new Map(currentRatings);
     const { deltasA, deltasB } = calculateEloDeltas(teamAElos, teamBElos, winner);
 
     match.team_a.forEach((id, i) => {
@@ -83,36 +94,41 @@ export async function POST(
       currentRatings.set(id, Math.max(100, before + deltasB[i]));
     });
 
-    // Record ELO history per player
-    [...match.team_a, ...match.team_b].forEach((id) => {
+    [...match.team_a, ...match.team_b].forEach((id, idx) => {
+      const isTeamA = idx < match.team_a.length;
+      const delta = isTeamA ? deltasA[idx] : deltasB[idx - match.team_a.length];
       eloHistoryInserts.push({
-        player_id: id,
-        session_id: sessionId,
+        player_id:    id,
+        session_id:   sessionId,
         rating_before: ratingsBefore.get(id) ?? 1000,
-        rating_after: currentRatings.get(id) ?? 1000,
+        rating_after:  currentRatings.get(id) ?? 1000,
+        delta,
       });
     });
 
     winnerIds.forEach((id) => sessionResults[id].wins++);
-    loserIds.forEach((id) => sessionResults[id].losses++);
+    loserIds.forEach((id)  => sessionResults[id].losses++);
   }
 
-  // 5. Calculate points per player
+  // 5. Points per player
   const pointsEarned: Record<string, number> = {};
   playerIds.forEach((id) => {
     const { wins, losses } = sessionResults[id];
     pointsEarned[id] = calculateSessionPoints(wins, losses);
   });
 
-  // 6. Load all-time stats for achievements
+  // 6. All-time stats for achievement checker
+  // Load all completed matches (all sessions)
   const { data: allMatchesData } = await admin
     .from("matches")
     .select("team_a, team_b, winner_team, session_id")
     .not("winner_team", "is", null);
 
+  // Load all-time session attendance
   const { data: sessionCountData } = await admin
-    .from("session_players").select("player_id");
+    .from("session_players").select("player_id, session_id");
 
+  // Load existing achievements for these players
   const { data: existingAchData } = await admin
     .from("achievements").select("player_id, badge_key").in("player_id", playerIds);
 
@@ -122,23 +138,34 @@ export async function POST(
     existingAchievements[row.player_id].push(row.badge_key);
   });
 
+  // Session counts per player (all-time, including current session)
   const sessionCounts: Record<string, number> = {};
   (sessionCountData ?? []).forEach((row: { player_id: string }) => {
     sessionCounts[row.player_id] = (sessionCounts[row.player_id] ?? 0) + 1;
   });
 
-  // Partnership wins all-time
+  // Compute all-time stats from all matches
+  const totalMatchesPerPlayer: Record<string, number>  = {};
+  const allTimeWinsPerPlayer: Record<string, number>   = {};
   const partnerWinsMap: Record<string, Record<string, number>> = {};
-  let totalGamesPerPlayer: Record<string, number> = {};
-  let upsetWinsMap: Record<string, number> = {};
+  const upsetWinsMap: Record<string, number>           = {};
 
   for (const m of allMatchesData ?? []) {
     if (!m.winner_team) continue;
-    const winnerIds = m.winner_team === "a" ? m.team_a : m.team_b;
-    const loserIds = m.winner_team === "a" ? m.team_b : m.team_a;
-    [...winnerIds, ...loserIds].forEach((id: string) => {
-      totalGamesPerPlayer[id] = (totalGamesPerPlayer[id] ?? 0) + 1;
+    const winnerIds = (m.winner_team === "a" ? m.team_a : m.team_b) as string[];
+    const loserIds  = (m.winner_team === "a" ? m.team_b : m.team_a) as string[];
+
+    // Match participation count
+    [...winnerIds, ...loserIds].forEach((id) => {
+      totalMatchesPerPlayer[id] = (totalMatchesPerPlayer[id] ?? 0) + 1;
     });
+
+    // All-time wins
+    winnerIds.forEach((id) => {
+      allTimeWinsPerPlayer[id] = (allTimeWinsPerPlayer[id] ?? 0) + 1;
+    });
+
+    // Partnership wins
     for (let i = 0; i < winnerIds.length; i++) {
       for (let j = i + 1; j < winnerIds.length; j++) {
         const a = winnerIds[i], b = winnerIds[j];
@@ -148,17 +175,30 @@ export async function POST(
         partnerWinsMap[b][a] = (partnerWinsMap[b][a] ?? 0) + 1;
       }
     }
+
+    // Upset wins: winner pair had lower avg ELO than loser pair (use current ratings as proxy)
+    if (winnerIds.length > 0 && loserIds.length > 0) {
+      const avgWinnerElo = winnerIds.reduce((s, id) => s + (profileMap.get(id)?.elo_rating ?? 1000), 0) / winnerIds.length;
+      const avgLoserElo  = loserIds.reduce((s, id) => s + (profileMap.get(id)?.elo_rating ?? 1000), 0) / loserIds.length;
+      if (avgLoserElo > avgWinnerElo) {
+        winnerIds.forEach((id) => {
+          upsetWinsMap[id] = (upsetWinsMap[id] ?? 0) + 1;
+        });
+      }
+    }
   }
 
   const allTimeStats = Object.fromEntries(
     playerIds.map((id) => [id, {
-      totalGamesPlayed: totalGamesPerPlayer[id] ?? 0,
-      sessionsAttended: sessionCounts[id] ?? 0,
-      upsetWins: upsetWinsMap[id] ?? 0,
-      partnerWins: partnerWinsMap[id] ?? {},
+      totalMatchesPlayed: totalMatchesPerPlayer[id] ?? 0,
+      allTimeWins:        allTimeWinsPerPlayer[id]  ?? 0,
+      sessionsAttended:   sessionCounts[id]          ?? 0,
+      upsetWins:          upsetWinsMap[id]           ?? 0,
+      partnerWins:        partnerWinsMap[id]         ?? {},
     }])
   );
 
+  // 7. Run achievement checker
   const newAchievements = checkAchievements({
     sessionId,
     matches: enrichedMatches,
@@ -167,26 +207,44 @@ export async function POST(
     allTimeStats,
   });
 
-  // 7. Write everything to DB (all via admin client — no RLS interference)
-  // ELO history
+  // Giant Killer (needs per-match ELO context — checked above)
+  giantKillerEarned.forEach((id) => {
+    if (!existingAchievements[id]?.includes("giant_killer")) {
+      if (!newAchievements[id]) newAchievements[id] = [];
+      if (!newAchievements[id].includes("giant_killer")) {
+        newAchievements[id].push("giant_killer");
+      }
+    }
+  });
+
+  // Top of the Table: highest ELO after this session
+  const maxElo = Math.max(...[...currentRatings.values()]);
+  currentRatings.forEach((elo, id) => {
+    if (elo === maxElo && !existingAchievements[id]?.includes("top_of_the_table")) {
+      if (!newAchievements[id]) newAchievements[id] = [];
+      if (!newAchievements[id].includes("top_of_the_table")) {
+        newAchievements[id].push("top_of_the_table");
+      }
+    }
+  });
+
+  // 8. Write to DB
   if (eloHistoryInserts.length > 0) {
     await admin.from("elo_history").insert(eloHistoryInserts);
   }
 
-  // Update profile ratings + points (all in parallel)
   await Promise.all(
     playerIds.map((id) => {
-      const newRating    = currentRatings.get(id) ?? profileMap.get(id)?.elo_rating ?? 1000;
-      const earnedPoints = pointsEarned[id] ?? 0;
+      const newRating     = currentRatings.get(id) ?? profileMap.get(id)?.elo_rating ?? 1000;
+      const earned        = pointsEarned[id] ?? 0;
       const currentPoints = profileMap.get(id)?.total_points ?? 0;
       return admin.from("profiles").update({
-        elo_rating: newRating,
-        total_points: currentPoints + earnedPoints,
+        elo_rating:   newRating,
+        total_points: currentPoints + earned,
       }).eq("id", id);
     })
   );
 
-  // New achievements
   const achievementInserts = Object.entries(newAchievements).flatMap(
     ([playerId, keys]) =>
       keys.map((key) => ({ player_id: playerId, badge_key: key, session_id: sessionId }))
@@ -195,15 +253,14 @@ export async function POST(
     await admin.from("achievements").insert(achievementInserts);
   }
 
-  // Mark session ended
   await admin.from("sessions").update({
     is_active: false,
-    ended_at: new Date().toISOString(),
+    ended_at:  new Date().toISOString(),
   }).eq("id", sessionId);
 
   return NextResponse.json({
-    success: true,
-    eloChanges: Object.fromEntries(currentRatings),
+    success:        true,
+    eloChanges:     Object.fromEntries(currentRatings),
     pointsEarned,
     newAchievements,
   });
