@@ -1,4 +1,5 @@
 import { BottomNav } from "@/components/nav/bottom-nav";
+import { ChatBot } from "@/components/chat/chat-bot";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -14,6 +15,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </main>
 
       <BottomNav />
+      <ChatBot />
     </div>
   );
 }

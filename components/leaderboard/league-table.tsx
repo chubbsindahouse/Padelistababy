@@ -1,12 +1,17 @@
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { Avatar } from "@/components/profile/avatar";
-import { cn, formatWinRate } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import type { LeaderboardEntry } from "@/types";
 
 const MEDALS: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
 
-export function LeagueTable({ entries }: { entries: LeaderboardEntry[] }) {
+interface Props {
+  entries: LeaderboardEntry[];
+  highlightCol?: "points" | "elo";
+}
+
+export function LeagueTable({ entries, highlightCol = "points" }: Props) {
   return (
     <div className="glass-card rounded-2xl overflow-hidden">
       {/* Header row */}
@@ -15,8 +20,14 @@ export function LeagueTable({ entries }: { entries: LeaderboardEntry[] }) {
         <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">Player</span>
         <span className="text-[10px] font-bold text-slate-600 text-center uppercase tracking-wide">W</span>
         <span className="text-[10px] font-bold text-slate-600 text-center uppercase tracking-wide">L</span>
-        <span className="text-[10px] font-bold text-slate-600 text-right uppercase tracking-wide">ELO</span>
-        <span className="text-[10px] font-bold text-slate-600 text-right uppercase tracking-wide">Pts</span>
+        <span className={cn(
+          "text-[10px] font-bold text-right uppercase tracking-wide",
+          highlightCol === "elo" ? "text-cyan-400" : "text-slate-600"
+        )}>ELO</span>
+        <span className={cn(
+          "text-[10px] font-bold text-right uppercase tracking-wide",
+          highlightCol === "points" ? "text-cyan-400" : "text-slate-600"
+        )}>Pts</span>
         <span />
       </div>
 
@@ -62,10 +73,16 @@ export function LeagueTable({ entries }: { entries: LeaderboardEntry[] }) {
             <span className="text-xs font-bold text-red-400/80 text-center tabular-nums">{losses}</span>
 
             {/* ELO */}
-            <span className="text-xs font-bold text-cyan-400 text-right tabular-nums">{profile.elo_rating}</span>
+            <span className={cn(
+              "text-xs font-bold text-right tabular-nums",
+              highlightCol === "elo" ? "text-cyan-400" : "text-slate-400"
+            )}>{profile.elo_rating}</span>
 
             {/* Pts */}
-            <span className="text-xs font-black gradient-text text-right tabular-nums">{profile.total_points}</span>
+            <span className={cn(
+              "text-xs font-black text-right tabular-nums",
+              highlightCol === "points" ? "gradient-text" : "text-slate-400"
+            )}>{profile.total_points}</span>
 
             {/* Chevron */}
             <ChevronRight size={13} className="text-slate-600 justify-self-end" />

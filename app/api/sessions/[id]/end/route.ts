@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdmin } from "@/lib/admin";
+import { getCurrentPlayerId } from "@/lib/player-auth";
 import { calculateEloDeltas } from "@/lib/elo";
 import { calculateSessionPoints } from "@/lib/points";
 import { checkAchievements } from "@/lib/achievements";
@@ -12,8 +13,9 @@ export async function POST(
 ) {
   const { id: sessionId } = await params;
 
-  if (!(await isAdmin())) {
-    return NextResponse.json({ error: "Admin access required" }, { status: 401 });
+  const [adminOk, playerId] = await Promise.all([isAdmin(), getCurrentPlayerId()]);
+  if (!adminOk && !playerId) {
+    return NextResponse.json({ error: "Authentication required" }, { status: 401 });
   }
 
   const admin = createAdminClient();

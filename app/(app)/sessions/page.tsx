@@ -12,7 +12,7 @@ export default async function SessionsPage() {
   const [activeRes, pastRes] = await Promise.all([
     supabase.from("sessions").select("id, format, is_active, created_at")
       .eq("is_active", true).order("created_at", { ascending: false }).limit(1),
-    supabase.from("sessions").select("id, date, format, is_active, winner_stays_on, session_players(player_id)")
+    supabase.from("sessions").select("id, date, format, is_active, winner_stays_on, session_players(player_id), matches(id)")
       .eq("is_active", false).order("date", { ascending: false }).limit(20),
   ]);
 
