@@ -1,7 +1,24 @@
 // ─── ELO Rating System ────────────────────────────────────────────────────────
 // Standard Elo with K=32. Applied per match (team average vs team average).
+// Dominance multiplier adjusts ELO based on scoreline (zero-sum: what winner
+// gains, loser loses exactly the same amount).
+//
+//  Clean sweep (2-0 / 3-0) → ×1.30  (+30%)
+//  Controlled win (3-1)     → ×1.10  (+10%)
+//  Close fight (2-1 / 3-2)  → ×0.85  (−15%)
 
 const K = 32;
+
+/**
+ * Compute dominance multiplier from game scores.
+ * @param winnerGames  - games won by the match winner
+ * @param loserGames   - games won by the match loser
+ */
+export function dominanceMultiplier(winnerGames: number, loserGames: number): number {
+  if (loserGames === 0) return 1.30;             // clean sweep (2-0 or 3-0)
+  if (winnerGames - loserGames >= 2) return 1.10; // controlled win (3-1 only)
+  return 0.85;                                    // close fight (2-1 or 3-2)
+}
 
 /** Expected score for player A given ratings rA and rB */
 export function expectedScore(rA: number, rB: number): number {
@@ -12,12 +29,15 @@ export function expectedScore(rA: number, rB: number): number {
  * Calculate new ratings for both teams after a match.
  * teamA and teamB are arrays of current ELO ratings.
  * winner: "a" | "b"
- * Returns deltas for each player.
+ * multiplier: dominance multiplier (default 1.0 = no adjustment)
+ *
+ * Zero-sum: the winner's gain equals the loser's loss exactly.
  */
 export function calculateEloDeltas(
   teamA: number[],
   teamB: number[],
-  winner: "a" | "b"
+  winner: "a" | "b",
+  multiplier = 1.0
 ): { deltasA: number[]; deltasB: number[] } {
   const avgA = teamA.reduce((s, r) => s + r, 0) / teamA.length;
   const avgB = teamB.reduce((s, r) => s + r, 0) / teamB.length;
@@ -25,11 +45,12 @@ export function calculateEloDeltas(
   const expectedA = expectedScore(avgA, avgB);
   const expectedB = 1 - expectedA;
 
-  const scoreA = winner === "a" ? 1 : 0;
-  const scoreB = winner === "b" ? 1 : 0;
+  // Apply multiplier to winner's base gain; mirror for zero-sum balance
+  const winnerExpected = winner === "a" ? expectedA : expectedB;
+  const rawDelta = Math.round(K * (1 - winnerExpected) * multiplier);
 
-  const deltaA = Math.round(K * (scoreA - expectedA));
-  const deltaB = Math.round(K * (scoreB - expectedB));
+  const deltaA = winner === "a" ?  rawDelta : -rawDelta;
+  const deltaB = winner === "b" ?  rawDelta : -rawDelta;
 
   return {
     deltasA: teamA.map(() => deltaA),

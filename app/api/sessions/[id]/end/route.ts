@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdmin } from "@/lib/admin";
 import { getCurrentPlayerId } from "@/lib/player-auth";
-import { calculateEloDeltas } from "@/lib/elo";
+import { calculateEloDeltas, dominanceMultiplier } from "@/lib/elo";
 import { calculateSessionPoints } from "@/lib/points";
 import { checkAchievements } from "@/lib/achievements";
 import type { MatchWithGames, Profile, BadgeKey } from "@/types";
@@ -84,8 +84,15 @@ export async function POST(
       winnerIds.forEach((id) => giantKillerEarned.add(id));
     }
 
+    // Dominance multiplier: 2-0/3-0 -> x1.30 | 3-1 -> x1.10 | 2-1/3-2 -> x0.85
+    const winnerGames = match.games.filter(g =>
+      winner === "a" ? g.score_a > g.score_b : g.score_b > g.score_a
+    ).length;
+    const loserGames = match.games.length - winnerGames;
+    const mult = dominanceMultiplier(winnerGames, loserGames);
+
     const ratingsBefore = new Map(currentRatings);
-    const { deltasA, deltasB } = calculateEloDeltas(teamAElos, teamBElos, winner);
+    const { deltasA, deltasB } = calculateEloDeltas(teamAElos, teamBElos, winner, mult);
 
     match.team_a.forEach((id, i) => {
       const before = currentRatings.get(id) ?? 1000;
