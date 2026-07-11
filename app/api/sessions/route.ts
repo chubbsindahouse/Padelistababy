@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { format, winner_stays_on, three_win_rule, players } = await req.json();
+    const { format, winner_stays_on, three_win_rule, players, mode, match_count, fixtures } = await req.json();
 
     if (!players || players.length < 4) {
       return NextResponse.json({ error: "At least 4 players required" }, { status: 400 });
@@ -44,7 +44,15 @@ export async function POST(req: NextRequest) {
 
     const { data: session, error: sessionError } = await supabase
       .from("sessions")
-      .insert({ format, winner_stays_on, three_win_rule, is_active: true, season_id: activeSeason?.id ?? null })
+      .insert({
+        format,
+        winner_stays_on: winner_stays_on ?? false,
+        three_win_rule: three_win_rule ?? false,
+        is_active: true,
+        season_id: activeSeason?.id ?? null,
+        mode: mode ?? "live",
+        match_count: match_count ?? null,
+      })
       .select()
       .single();
 
@@ -59,6 +67,26 @@ export async function POST(req: NextRequest) {
     if (playersError) {
       await supabase.from("sessions").delete().eq("id", session.id);
       return NextResponse.json({ error: playersError.message }, { status: 500 });
+    }
+
+    // For round robin: pre-create all fixtures as matches with no winner yet
+    if (mode === "round_robin" && Array.isArray(fixtures) && fixtures.length > 0) {
+      const { error: fixturesError } = await supabase
+        .from("matches")
+        .insert(
+          fixtures.map((f: { team_a: string[]; team_b: string[] }, i: number) => ({
+            session_id: session.id,
+            team_a: f.team_a,
+            team_b: f.team_b,
+            match_order: i,
+            consecutive_wins: 0,
+          }))
+        );
+
+      if (fixturesError) {
+        await supabase.from("sessions").delete().eq("id", session.id);
+        return NextResponse.json({ error: fixturesError.message }, { status: 500 });
+      }
     }
 
     return NextResponse.json({ id: session.id });

@@ -42,6 +42,8 @@ export interface Session {
   is_active: boolean;
   ended_at: string | null;
   created_at: string;
+  mode: "live" | "round_robin";
+  match_count: number | null;
 }
 
 export interface SessionPlayer {
@@ -127,12 +129,15 @@ export interface MatchWithGames extends Match {
 // ─── New session wizard state ─────────────────────────────────────────────────
 
 export interface NewSessionState {
-  step: 1 | 2 | 3 | 4;
-  players: string[]; // selected player IDs
+  step: number;
+  players: string[];
+  mode: "live" | "round_robin";
   teamingMethod: "manual" | "auto";
   format: "bo3" | "bo5";
   winnerStaysOn: boolean;
   threeWinRule: boolean;
+  matchCount: number;
+  fixtures: { team_a: string[]; team_b: string[] }[];
 }
 
 // ─── Active session state (client-side) ──────────────────────────────────────

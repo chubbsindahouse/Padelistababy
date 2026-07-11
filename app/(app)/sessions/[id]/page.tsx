@@ -471,6 +471,222 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     </div>
   );
 
+  /* ── Round Robin active session ── */
+  if (session.is_active && session.mode === "round_robin") {
+    const totalFixtures = matches.length;
+    const progress      = completedMatches.length;
+    const progressPct   = totalFixtures > 0 ? (progress / totalFixtures) * 100 : 0;
+    const allDone       = progress === totalFixtures && totalFixtures > 0;
+
+    return (
+      <div className="min-h-screen bg-[#05050A] flex flex-col">
+        <div className="fixed top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-violet-500/6 blur-[120px] rounded-full pointer-events-none" />
+
+        {/* Header */}
+        <div className="relative z-10 px-4 pt-safe border-b border-white/[0.06] bg-[#05050A]/80 backdrop-blur-xl">
+          <div className="flex items-center gap-3 py-4">
+            <button onClick={() => router.back()} className="p-2 -ml-2 rounded-xl text-slate-400 active:bg-white/5 transition-colors">
+              <ChevronLeft size={22} />
+            </button>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+                <h1 className="text-base font-bold text-white">Round Robin</h1>
+              </div>
+              <p className="text-xs text-slate-500">{session.format.toUpperCase()} · {progress}/{totalFixtures} matches played</p>
+            </div>
+            <button onClick={endSession} disabled={endingSession}
+              className="flex items-center gap-1.5 px-3 py-2 bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-semibold rounded-xl active:bg-red-500/20 transition-all">
+              {endingSession ? <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" /> : <Flag size={13} />}
+              End
+            </button>
+          </div>
+
+          {/* Progress bar */}
+          <div className="pb-3">
+            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-violet-500 to-purple-600 rounded-full transition-all duration-500"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="relative z-10 flex-1 px-4 py-4 space-y-4 overflow-y-auto pb-28">
+
+          {/* All done */}
+          {allDone && (
+            <div className="relative rounded-2xl overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-violet-500/15 to-purple-600/10" />
+              <div className="absolute inset-0 border border-violet-500/25 rounded-2xl" />
+              <div className="relative p-5 text-center">
+                <p className="text-2xl mb-2">🎾</p>
+                <p className="text-base font-black text-white">All matches complete!</p>
+                <p className="text-xs text-slate-400 mt-1">End the session to lock in ELO and badges.</p>
+                <button onClick={endSession} disabled={endingSession}
+                  className="mt-4 px-6 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white font-bold text-sm active:scale-[0.98] transition-all shadow-[0_0_24px_rgba(139,92,246,0.35)]">
+                  End Session & Calculate ELO
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Current match scoring */}
+          {currentMatch && !allDone && (
+            <div className="relative rounded-2xl overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-violet-500/10 to-purple-600/5" />
+              <div className="absolute inset-0 border border-violet-500/20 rounded-2xl" />
+              <div className="relative p-5">
+                <p className="text-xs font-bold text-violet-400 uppercase tracking-widest mb-4">
+                  Match {matches.findIndex(m => m.id === currentMatch.id) + 1} in progress
+                </p>
+
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                  <div className="text-center min-w-0">
+                    <div className="flex justify-center gap-1 mb-2">
+                      {currentMatch.team_a.map(id => <Avatar key={id} name={getProfile(id)?.name ?? "?"} avatarUrl={getProfile(id)?.avatar_url} size="md" />)}
+                    </div>
+                    <p className="text-xs font-semibold text-slate-300 truncate px-1">
+                      {currentMatch.team_a.map(id => getProfile(id)?.name?.split(" ")[0]).join(" & ")}
+                    </p>
+                    <p className={cn("text-6xl font-black mt-3 leading-none", gamesWonA > gamesWonB ? "gradient-text" : "text-white/40")}>{gamesWonA}</p>
+                  </div>
+                  <div className="text-center shrink-0 px-1">
+                    <p className="text-[10px] text-slate-600 font-bold">VS</p>
+                    <p className="text-[10px] text-slate-700 mt-1">{session.format.toUpperCase()}</p>
+                  </div>
+                  <div className="text-center min-w-0">
+                    <div className="flex justify-center gap-1 mb-2">
+                      {currentMatch.team_b.map(id => <Avatar key={id} name={getProfile(id)?.name ?? "?"} avatarUrl={getProfile(id)?.avatar_url} size="md" />)}
+                    </div>
+                    <p className="text-xs font-semibold text-slate-300 truncate px-1">
+                      {currentMatch.team_b.map(id => getProfile(id)?.name?.split(" ")[0]).join(" & ")}
+                    </p>
+                    <p className={cn("text-6xl font-black mt-3 leading-none", gamesWonB > gamesWonA ? "gradient-text" : "text-white/40")}>{gamesWonB}</p>
+                  </div>
+                </div>
+
+                {currentMatch.games.length > 0 && (
+                  <div className="flex gap-2 justify-center mt-4 flex-wrap">
+                    {currentMatch.games.map((g, i) => {
+                      const aWon = g.score_a > g.score_b;
+                      return (
+                        <div key={i} className={cn("px-2.5 py-1 rounded-lg text-[11px] font-bold border",
+                          aWon ? "bg-violet-500/10 border-violet-500/20 text-violet-300" : "bg-purple-500/10 border-purple-500/20 text-purple-300")}>
+                          G{i + 1} · {aWon
+                            ? currentMatch.team_a.map(id => getProfile(id)?.name?.split(" ")[0]).join(" & ")
+                            : currentMatch.team_b.map(id => getProfile(id)?.name?.split(" ")[0]).join(" & ")}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {!canDeclare && (
+                  <div className="mt-5">
+                    <p className="text-xs text-slate-500 text-center mb-3">Who won this game?</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button onClick={() => recordGameWin("a")} disabled={submittingScore}
+                        className="py-5 rounded-xl bg-violet-500/10 border border-violet-500/30 active:bg-violet-500/20 disabled:opacity-50 transition-all text-center">
+                        <p className="text-sm font-bold text-violet-300 truncate px-2">
+                          {currentMatch.team_a.map(id => getProfile(id)?.name?.split(" ")[0]).join(" & ")}
+                        </p>
+                        <p className="text-[10px] text-violet-600 mt-1">wins game</p>
+                      </button>
+                      <button onClick={() => recordGameWin("b")} disabled={submittingScore}
+                        className="py-5 rounded-xl bg-purple-500/10 border border-purple-500/30 active:bg-purple-500/20 disabled:opacity-50 transition-all text-center">
+                        <p className="text-sm font-bold text-purple-300 truncate px-2">
+                          {currentMatch.team_b.map(id => getProfile(id)?.name?.split(" ")[0]).join(" & ")}
+                        </p>
+                        <p className="text-[10px] text-purple-600 mt-1">wins game</p>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {canDeclare && (
+                  <div className="mt-5 space-y-3">
+                    <p className="text-sm font-bold text-center text-white">Match complete — declare the winner</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button onClick={() => declareMatchWinner("a")}
+                        className="py-3.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white text-sm font-bold active:scale-[0.98] transition-all truncate px-3">
+                        {currentMatch.team_a.map(id => getProfile(id)?.name?.split(" ")[0]).join(" & ")} Won
+                      </button>
+                      <button onClick={() => declareMatchWinner("b")}
+                        className="py-3.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white text-sm font-bold active:scale-[0.98] transition-all truncate px-3">
+                        {currentMatch.team_b.map(id => getProfile(id)?.name?.split(" ")[0]).join(" & ")} Won
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* All fixtures list */}
+          <div className="glass-card rounded-2xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/[0.06]">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">All Fixtures</p>
+            </div>
+            <div className="divide-y divide-white/[0.05]">
+              {matches.map((m, i) => {
+                const isActive = m.id === currentMatch?.id;
+                const isDone   = m.winner_team !== null;
+                const aW = m.games.filter(g => g.score_a > g.score_b).length;
+                const bW = m.games.filter(g => g.score_b > g.score_a).length;
+
+                return (
+                  <div key={m.id} className={cn(
+                    "px-4 py-3 transition-all",
+                    isActive && "bg-violet-500/5",
+                    !isDone && !isActive && "opacity-50",
+                  )}>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      {isActive && <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse shrink-0" />}
+                      <p className={cn("text-[10px] font-bold uppercase tracking-widest",
+                        isActive ? "text-violet-400" : isDone ? "text-slate-600" : "text-slate-700")}>
+                        {isActive ? "In Progress" : isDone ? `Match ${i + 1}` : `#${i + 1}`}
+                      </p>
+                      {isDone && (
+                        <span className="ml-auto font-mono text-xs font-bold text-white bg-white/5 rounded-lg px-2 py-0.5 shrink-0">
+                          {aW}–{bW}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1">
+                      <div className="text-center min-w-0">
+                        <div className="flex justify-center gap-0.5 mb-1">
+                          {m.team_a.map(id => <Avatar key={id} name={getProfile(id)?.name ?? "?"} avatarUrl={getProfile(id)?.avatar_url} size="sm" />)}
+                        </div>
+                        <p className={cn("text-xs font-semibold truncate",
+                          isDone && m.winner_team === "a" ? "text-violet-400" : "text-slate-400")}>
+                          {m.team_a.map(id => getProfile(id)?.name?.split(" ")[0]).join(" & ")}
+                        </p>
+                      </div>
+                      <p className="text-[9px] text-slate-700 font-bold shrink-0 px-1">vs</p>
+                      <div className="text-center min-w-0">
+                        <div className="flex justify-center gap-0.5 mb-1">
+                          {m.team_b.map(id => <Avatar key={id} name={getProfile(id)?.name ?? "?"} avatarUrl={getProfile(id)?.avatar_url} size="sm" />)}
+                        </div>
+                        <p className={cn("text-xs font-semibold truncate",
+                          isDone && m.winner_team === "b" ? "text-violet-400" : "text-slate-400")}>
+                          {m.team_b.map(id => getProfile(id)?.name?.split(" ")[0]).join(" & ")}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="h-4" />
+        </div>
+      </div>
+    );
+  }
+
   /* ── Pair setup screen ── */
   if (needsPairSetup) {
     const numPairs = Math.floor(players.length / 2);
