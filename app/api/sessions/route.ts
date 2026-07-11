@@ -35,9 +35,16 @@ export async function POST(req: NextRequest) {
 
     const supabase = createServiceClient();
 
+    // Attach to the currently active season
+    const { data: activeSeason } = await supabase
+      .from("seasons")
+      .select("id")
+      .eq("is_active", true)
+      .single();
+
     const { data: session, error: sessionError } = await supabase
       .from("sessions")
-      .insert({ format, winner_stays_on, three_win_rule, is_active: true })
+      .insert({ format, winner_stays_on, three_win_rule, is_active: true, season_id: activeSeason?.id ?? null })
       .select()
       .single();
 

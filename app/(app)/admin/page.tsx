@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, Plus, Trash2, LogOut, Users, CalendarDays, RefreshCw, X, Check, Pencil, KeyRound, Eye, EyeOff } from "lucide-react";
+import { ShieldCheck, Plus, Trash2, LogOut, Users, CalendarDays, RefreshCw, X, Check, Pencil, KeyRound, Eye, EyeOff, Trophy } from "lucide-react";
 import { Avatar } from "@/components/profile/avatar";
 import { cn } from "@/lib/utils";
 
-type Tab = "players" | "sessions";
+type Tab = "players" | "sessions" | "season";
 
 interface Player {
   id: string; name: string; username?: string | null;
@@ -14,6 +14,9 @@ interface Player {
 }
 interface Session {
   id: string; date: string; format: string; is_active: boolean; winner_stays_on: boolean;
+}
+interface Season {
+  id: string; number: number; name: string; is_active: boolean; started_at: string; ended_at: string | null;
 }
 
 export default function AdminPage() {
@@ -44,6 +47,10 @@ export default function AdminPage() {
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // Season state
+  const [seasons,      setSeasons]      = useState<Season[]>([]);
+  const [endingSeason, setEndingSession] = useState(false);
+
   useEffect(() => {
     fetch("/api/admin/players")
       .then((r) => {
@@ -65,10 +72,35 @@ export default function AdminPage() {
     if (r.ok) setSessions(await r.json());
   }, []);
 
+  const loadSeasons = useCallback(async () => {
+    const r = await fetch("/api/seasons");
+    if (r.ok) setSeasons(await r.json());
+  }, []);
+
   useEffect(() => {
     if (!isAdmin) return;
     if (tab === "sessions") loadSessions();
-  }, [tab, isAdmin, loadSessions]);
+    if (tab === "season")   loadSeasons();
+  }, [tab, isAdmin, loadSessions, loadSeasons]);
+
+  async function endSeason() {
+    const activeSeason = seasons.find((s) => s.is_active);
+    if (!activeSeason) return;
+    if (!confirm(`End ${activeSeason.name} and start Season ${activeSeason.number + 1}? This will reset all ELO to 1000 and points to 0. This cannot be undone.`)) return;
+    setEndingSession(true);
+    try {
+      const r = await fetch("/api/admin/seasons", { method: "POST" });
+      if (r.ok) {
+        await loadSeasons();
+        alert(`${activeSeason.name} ended! Season ${activeSeason.number + 1} has begun.`);
+      } else {
+        const b = await r.json();
+        alert(b.error ?? "Failed to end season.");
+      }
+    } finally {
+      setEndingSession(false);
+    }
+  }
 
   async function addPlayer() {
     if (!newName.trim()) return;
@@ -205,6 +237,7 @@ export default function AdminPage() {
           {([
             { key: "players",  label: "Players",  Icon: Users },
             { key: "sessions", label: "Sessions", Icon: CalendarDays },
+            { key: "season",   label: "Season",   Icon: Trophy },
           ] as { key: Tab; label: string; Icon: React.ElementType }[]).map(({ key, label, Icon }) => (
             <button key={key} onClick={() => setTab(key)}
               className={cn(
@@ -357,6 +390,84 @@ export default function AdminPage() {
             )}
           </div>
         )}
+
+        {/* ── Season ── */}
+        {tab === "season" && (
+          <div className="space-y-4 pb-8">
+            {/* Active season card */}
+            {seasons.filter((s) => s.is_active).map((s) => (
+              <div key={s.id} className="glass-card rounded-2xl p-4 relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/8 to-blue-600/5" />
+                <div className="absolute inset-0 border border-cyan-500/15 rounded-2xl" />
+                <div className="relative">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-400" />
+                    </span>
+                    <p className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest">Active Season</p>
+                  </div>
+                  <p className="text-xl font-heading font-black text-white">{s.name}</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Started {new Date(s.started_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
+                  </p>
+                </div>
+              </div>
+            ))}
+
+            {/* End season button */}
+            {seasons.some((s) => s.is_active) && (
+              <div className="glass-card rounded-2xl p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-bold text-white">End Season</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Snapshots current rankings, resets all ELO to 1000 and points to 0, and starts the next season. This cannot be undone.
+                  </p>
+                </div>
+                <button
+                  onClick={endSeason}
+                  disabled={endingSeason}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-red-500 to-rose-600 text-white font-bold text-sm disabled:opacity-40 flex items-center justify-center gap-2 active:scale-[0.98] transition-all"
+                >
+                  {endingSeason
+                    ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    : <><Trophy size={15} /> End Season &amp; Start New</>}
+                </button>
+              </div>
+            )}
+
+            {/* Past seasons */}
+            <div>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">
+                Past Seasons
+              </p>
+              {seasons.filter((s) => !s.is_active).length === 0 ? (
+                <div className="text-center py-10">
+                  <p className="text-3xl mb-2">🏆</p>
+                  <p className="text-sm text-slate-500">No completed seasons yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {seasons.filter((s) => !s.is_active).map((s) => (
+                    <div key={s.id} className="glass-card rounded-2xl p-4 flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                        <Trophy size={16} className="text-slate-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-white">{s.name}</p>
+                        <p className="text-xs text-slate-500">
+                          {new Date(s.started_at).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
+                          {s.ended_at ? ` → ${new Date(s.ended_at).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );

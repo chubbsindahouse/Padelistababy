@@ -1,5 +1,26 @@
 // ─── Database row types ───────────────────────────────────────────────────────
 
+export interface Season {
+  id: string;
+  number: number;
+  name: string;
+  is_active: boolean;
+  started_at: string;
+  ended_at: string | null;
+}
+
+export interface SeasonSnapshot {
+  id: string;
+  season_id: string;
+  player_id: string;
+  final_elo: number;
+  final_points: number;
+  final_rank: number;
+  match_wins: number;
+  match_losses: number;
+  created_at: string;
+}
+
 export interface Profile {
   id: string;
   name: string;

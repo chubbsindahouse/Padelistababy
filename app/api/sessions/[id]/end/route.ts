@@ -130,9 +130,12 @@ export async function POST(
   const { data: sessionCountData } = await admin
     .from("session_players").select("player_id, session_id");
 
-  // Load existing achievements for these players
-  const { data: existingAchData } = await admin
+  // Load existing achievements for these players — filtered to the current season only
+  const seasonId: string | null = session.season_id ?? null;
+  const existingAchQuery = admin
     .from("achievements").select("player_id, badge_key").in("player_id", playerIds);
+  if (seasonId) existingAchQuery.eq("season_id", seasonId);
+  const { data: existingAchData } = await existingAchQuery;
 
   const existingAchievements: Record<string, BadgeKey[]> = {};
   (existingAchData ?? []).forEach((row: { player_id: string; badge_key: BadgeKey }) => {
@@ -249,7 +252,7 @@ export async function POST(
 
   const achievementInserts = Object.entries(newAchievements).flatMap(
     ([playerId, keys]) =>
-      keys.map((key) => ({ player_id: playerId, badge_key: key, session_id: sessionId }))
+      keys.map((key) => ({ player_id: playerId, badge_key: key, session_id: sessionId, season_id: seasonId }))
   );
   if (achievementInserts.length > 0) {
     await admin.from("achievements").insert(achievementInserts);
