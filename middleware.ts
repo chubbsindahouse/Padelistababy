@@ -6,7 +6,7 @@ import { verifyPlayerToken, PLAYER_COOKIE } from "@/lib/player-auth";
 const ADMIN_ONLY = ["/admin", "/api/admin"];
 
 // Routes that need a player OR admin session (any logged-in user)
-const PLAYER_ROUTES = ["/profile", "/api/player", "/sessions/new", "/api/sessions"];
+const PLAYER_ROUTES = ["/profile", "/api/player", "/sessions", "/api/sessions"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
