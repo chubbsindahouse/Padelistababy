@@ -1,38 +1,115 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdmin } from "@/lib/admin";
-import { createServiceClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { calculateSessionPoints } from "@/lib/points";
 
-/** DELETE /api/admin/sessions/[id] — delete a session and all related data */
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+/** DELETE /api/admin/sessions/[id]
+ *  Deletes a session and fully rolls back all side-effects:
+ *  - ELO and points changes on player profiles
+ *  - Achievements awarded in the session
+ *  - elo_history rows
+ *  - games, matches, session_players, session
+ */
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   if (!(await isAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { id } = await params;
-  const supabase = createServiceClient();
+  const { id: sessionId } = await params;
+  const admin = createAdminClient();
 
-  // Get all matches for this session
-  const { data: matches } = await supabase
-    .from("matches").select("id").eq("session_id", id);
+  // 1. Check if session was already ended (ELO/points already applied)
+  const { data: session } = await admin
+    .from("sessions").select("is_active").eq("id", sessionId).single();
+  if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
-  // Delete games for those matches
-  if (matches?.length) {
-    const matchIds = matches.map((m) => m.id);
-    await supabase.from("games").delete().in("match_id", matchIds);
-    await supabase.from("matches").delete().in("id", matchIds);
+  if (!session.is_active) {
+    // 2. Revert ELO: sum net delta per player from elo_history
+    const { data: eloRows } = await admin
+      .from("elo_history")
+      .select("player_id, delta")
+      .eq("session_id", sessionId);
+
+    const netDelta: Record<string, number> = {};
+    for (const row of eloRows ?? []) {
+      netDelta[row.player_id] = (netDelta[row.player_id] ?? 0) + row.delta;
+    }
+
+    // 3. Revert points: recompute from completed matches in the session
+    const { data: completedMatches } = await admin
+      .from("matches")
+      .select("team_a, team_b, winner_team")
+      .eq("session_id", sessionId)
+      .not("winner_team", "is", null);
+
+    const results: Record<string, { wins: number; losses: number }> = {};
+    for (const m of completedMatches ?? []) {
+      const winners = m.winner_team === "a" ? m.team_a : m.team_b;
+      const losers  = m.winner_team === "a" ? m.team_b : m.team_a;
+      for (const id of [...winners, ...losers]) {
+        if (!results[id]) results[id] = { wins: 0, losses: 0 };
+      }
+      for (const id of winners as string[]) results[id].wins++;
+      for (const id of losers  as string[]) results[id].losses++;
+    }
+
+    const pointsToDeduct: Record<string, number> = {};
+    for (const [pid, { wins, losses }] of Object.entries(results)) {
+      pointsToDeduct[pid] = calculateSessionPoints(wins, losses);
+    }
+
+    // 4. Apply reversals to profiles
+    const allPlayerIds = [...new Set([...Object.keys(netDelta), ...Object.keys(pointsToDeduct)])];
+    if (allPlayerIds.length > 0) {
+      const { data: profiles } = await admin
+        .from("profiles")
+        .select("id, elo_rating, total_points")
+        .in("id", allPlayerIds);
+
+      await Promise.all(
+        (profiles ?? []).map((p: { id: string; elo_rating: number; total_points: number }) =>
+          admin.from("profiles").update({
+            elo_rating:   Math.max(100, p.elo_rating   - (netDelta[p.id]       ?? 0)),
+            total_points: Math.max(0,   p.total_points - (pointsToDeduct[p.id] ?? 0)),
+          }).eq("id", p.id)
+        )
+      );
+    }
+
+    // 5. Delete achievements + elo_history for this session
+    await Promise.all([
+      admin.from("achievements").delete().eq("session_id", sessionId),
+      admin.from("elo_history").delete().eq("session_id", sessionId),
+    ]);
   }
 
-  await supabase.from("session_players").delete().eq("session_id", id);
-  await supabase.from("sessions").delete().eq("id", id);
+  // 6. Delete games → matches → session_players → session
+  const { data: matches } = await admin
+    .from("matches").select("id").eq("session_id", sessionId);
+
+  if (matches?.length) {
+    const matchIds = matches.map((m: { id: string }) => m.id);
+    await admin.from("games").delete().in("match_id", matchIds);
+    await admin.from("matches").delete().in("id", matchIds);
+  }
+
+  await admin.from("session_players").delete().eq("session_id", sessionId);
+  await admin.from("sessions").delete().eq("id", sessionId);
 
   return NextResponse.json({ ok: true });
 }
 
 /** PATCH /api/admin/sessions/[id] — toggle is_active or update format */
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   if (!(await isAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await req.json();
 
-  const supabase = createServiceClient();
-  const { data, error } = await supabase
+  const admin = createAdminClient();
+  const { data, error } = await admin
     .from("sessions").update(body).eq("id", id).select().single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data);
