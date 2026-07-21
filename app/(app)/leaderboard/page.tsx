@@ -8,7 +8,7 @@ export default async function LeaderboardPage() {
   const admin = createAdminClient();
 
   const [profilesRes, matchesRes, seasonsRes] = await Promise.all([
-    admin.from("profiles").select("id, name, avatar_url, total_points, elo_rating").order("total_points", { ascending: false }),
+    admin.from("profiles").select("id, name, avatar_url, total_points, elo_rating").order("total_points", { ascending: false }).order("elo_rating", { ascending: false }),
     admin.from("matches").select("team_a, team_b, winner_team, session_id").not("winner_team", "is", null),
     admin.from("seasons").select("*").order("number", { ascending: false }),
   ]);
