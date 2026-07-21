@@ -23,19 +23,24 @@ export async function DELETE(
     .from("sessions").select("is_active").eq("id", sessionId).single();
   if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
+  // ── 2. Always revert ELO ────────────────────────────────────────────────────
+  // ELO is applied per-match (recorded in elo_history) regardless of whether
+  // the session has been formally ended, so we always need to roll it back.
+  const { data: eloRows } = await admin
+    .from("elo_history")
+    .select("player_id, delta")
+    .eq("session_id", sessionId);
+
+  const netDelta: Record<string, number> = {};
+  for (const row of eloRows ?? []) {
+    netDelta[row.player_id] = (netDelta[row.player_id] ?? 0) + row.delta;
+  }
+
+  // ── 3. Revert points only for ended sessions ─────────────────────────────
+  // Points (calculateSessionPoints) are only awarded when a session is ended,
+  // so active sessions have no points to roll back.
+  const pointsToDeduct: Record<string, number> = {};
   if (!session.is_active) {
-    // 2. Revert ELO: sum net delta per player from elo_history
-    const { data: eloRows } = await admin
-      .from("elo_history")
-      .select("player_id, delta")
-      .eq("session_id", sessionId);
-
-    const netDelta: Record<string, number> = {};
-    for (const row of eloRows ?? []) {
-      netDelta[row.player_id] = (netDelta[row.player_id] ?? 0) + row.delta;
-    }
-
-    // 3. Revert points: recompute from completed matches in the session
     const { data: completedMatches } = await admin
       .from("matches")
       .select("team_a, team_b, winner_team")
@@ -53,35 +58,34 @@ export async function DELETE(
       for (const id of losers  as string[]) results[id].losses++;
     }
 
-    const pointsToDeduct: Record<string, number> = {};
     for (const [pid, { wins, losses }] of Object.entries(results)) {
       pointsToDeduct[pid] = calculateSessionPoints(wins, losses);
     }
-
-    // 4. Apply reversals to profiles
-    const allPlayerIds = [...new Set([...Object.keys(netDelta), ...Object.keys(pointsToDeduct)])];
-    if (allPlayerIds.length > 0) {
-      const { data: profiles } = await admin
-        .from("profiles")
-        .select("id, elo_rating, total_points")
-        .in("id", allPlayerIds);
-
-      await Promise.all(
-        (profiles ?? []).map((p: { id: string; elo_rating: number; total_points: number }) =>
-          admin.from("profiles").update({
-            elo_rating:   Math.max(100, p.elo_rating   - (netDelta[p.id]       ?? 0)),
-            total_points: Math.max(0,   p.total_points - (pointsToDeduct[p.id] ?? 0)),
-          }).eq("id", p.id)
-        )
-      );
-    }
-
-    // 5. Delete achievements + elo_history for this session
-    await Promise.all([
-      admin.from("achievements").delete().eq("session_id", sessionId),
-      admin.from("elo_history").delete().eq("session_id", sessionId),
-    ]);
   }
+
+  // ── 4. Apply reversals to profiles ──────────────────────────────────────
+  const allPlayerIds = [...new Set([...Object.keys(netDelta), ...Object.keys(pointsToDeduct)])];
+  if (allPlayerIds.length > 0) {
+    const { data: profiles } = await admin
+      .from("profiles")
+      .select("id, elo_rating, total_points")
+      .in("id", allPlayerIds);
+
+    await Promise.all(
+      (profiles ?? []).map((p: { id: string; elo_rating: number; total_points: number }) =>
+        admin.from("profiles").update({
+          elo_rating:   Math.max(100, p.elo_rating   - (netDelta[p.id]       ?? 0)),
+          total_points: Math.max(0,   p.total_points - (pointsToDeduct[p.id] ?? 0)),
+        }).eq("id", p.id)
+      )
+    );
+  }
+
+  // ── 5. Delete achievements (ended sessions only) + elo_history (always) ──
+  await Promise.all([
+    ...(session.is_active ? [] : [admin.from("achievements").delete().eq("session_id", sessionId)]),
+    admin.from("elo_history").delete().eq("session_id", sessionId),
+  ]);
 
   // 6. Delete games → matches → session_players → session
   const { data: matches } = await admin
